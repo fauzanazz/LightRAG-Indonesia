@@ -1,0 +1,88 @@
+# LightRAG Fact-Checking Experiment Configuration
+# ================================================
+
+dataset:
+  # Path to MAFINDO dataset CSV (raw or preprocessed)
+  evidence_csv: "../../dataset/v6-Mafindo-preprocessed.csv"
+  # Fallback to raw if preprocessed not found
+  raw_csv: "../../dataset/v6-Mafindo-evidence.csv"
+
+# LLM configuration
+# Provider options: "ollama" (local), "openrouter" (cloud API)
+llm:
+  provider: "ollama"                   # "openrouter" | "ollama"
+  model: "llama3.1:8b"                 # Ollama: "llama3.1:8b", OpenRouter: "meta-llama/llama-3.1-8b-instruct"
+  host: "http://localhost:11434"       # Ollama host (ignored for openrouter)
+  base_url: "https://openrouter.ai/api/v1"  # OpenRouter URL (ignored for ollama)
+  # api_key: set via OPENROUTER_API_KEY env var (for openrouter provider)
+  timeout: 300
+  max_async: 4
+
+# Embedding configuration
+embedding:
+  provider: "ollama"                  # "ollama" | "openai"
+  model: "bge-m3:latest"
+  host: "http://localhost:11434"
+  dim: 1024
+  max_tokens: 8192
+
+# LightRAG KG configuration
+lightrag:
+  working_dir: "./rag_storage"
+  chunk_size: 1200
+  chunk_overlap: 100
+  graph_storage: "NetworkXStorage"     # "NetworkXStorage" | "Neo4JStorage"
+  vector_storage: "NanoVectorDBStorage"
+  kv_storage: "JsonKVStorage"
+  top_k: 5
+  entity_extract_max_gleaning: 1
+
+# Indonesian adaptation feature flags
+# Each can be toggled independently for controlled experiments
+flags:
+  summary_language: "Indonesian"       # "English" | "Indonesian"
+  use_indonesian_prompts: true
+  use_factcheck_entities: false        # Toggle for entity type comparison
+  use_indonesian_preprocessing: true
+
+# Query configuration for fact-checking
+query:
+  # LightRAG retrieval modes to test
+  modes: ["naive", "local", "global", "hybrid", "mix"]
+  # Default mode for classification
+  default_mode: "hybrid"
+  # Only retrieve context (no LLM generation for retrieval step)
+  only_need_context: false
+
+# Classification configuration
+classification:
+  # Prompt template for fact-checking classification
+  # Available placeholders: {claim}, {evidence_context}
+  system_prompt: |
+    Anda adalah sistem pengecekan fakta otomatis. Tugas Anda adalah mengklasifikasikan
+    klaim berdasarkan bukti yang diberikan.
+
+    Klasifikasikan klaim ke salah satu label berikut:
+    - Supported: Klaim didukung oleh bukti yang ada
+    - Refuted: Klaim dibantah atau tidak sesuai dengan bukti yang ada
+
+    Berikan HANYA label klasifikasi (Supported atau Refuted), tanpa penjelasan.
+  
+  user_prompt: |
+    Klaim: {claim}
+    
+    Bukti yang ditemukan:
+    {evidence_context}
+    
+    Klasifikasi:
+
+# Evaluation configuration
+evaluation:
+  sample_size: null                    # null = use all, or integer for subset
+  metrics: ["accuracy", "precision", "recall", "f1_macro", "f1_weighted"]
+
+# Output configuration
+output:
+  experiments_dir: "results"
+  save_predictions: true
+  save_retrieval_context: true
