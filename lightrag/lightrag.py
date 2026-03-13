@@ -24,7 +24,7 @@ from typing import (
     Dict,
     Union,
 )
-from lightrag.prompt import PROMPTS
+from lightrag.prompt import PROMPTS, PROMPTS_ID
 from lightrag.exceptions import PipelineCancelledException
 from lightrag.constants import (
     DEFAULT_MAX_GLEANING,
@@ -48,6 +48,7 @@ from lightrag.constants import (
     DEFAULT_MAX_SOURCE_IDS_PER_ENTITY,
     DEFAULT_MAX_SOURCE_IDS_PER_RELATION,
     DEFAULT_ENTITY_TYPES,
+    FACTCHECK_ENTITY_TYPES,
     DEFAULT_SUMMARY_LANGUAGE,
     DEFAULT_LLM_TIMEOUT,
     DEFAULT_EMBEDDING_TIMEOUT,
@@ -452,6 +453,16 @@ class LightRAG:
                 "SUMMARY_LANGUAGE", DEFAULT_SUMMARY_LANGUAGE, str
             ),
             "entity_types": get_env_value("ENTITY_TYPES", DEFAULT_ENTITY_TYPES, list),
+            # --- Indonesian adaptation feature flags ---
+            "use_indonesian_prompts": get_env_value(
+                "USE_INDONESIAN_PROMPTS", False, bool
+            ),
+            "use_factcheck_entities": get_env_value(
+                "USE_FACTCHECK_ENTITIES", False, bool
+            ),
+            "use_indonesian_preprocessing": get_env_value(
+                "USE_INDONESIAN_PREPROCESSING", False, bool
+            ),
         }
     )
 
@@ -1331,6 +1342,13 @@ class LightRAG:
             file_paths = ["unknown_source"] * len(input)
 
         # 1. Validate ids if provided or generate MD5 hash IDs and remove duplicate contents
+        # Apply Indonesian preprocessing if flag is ON
+        use_indo_preprocess = self.addon_params.get(
+            "use_indonesian_preprocessing", False
+        )
+        if use_indo_preprocess:
+            from lightrag.indonesian.preprocessor import preprocess_indonesian_text
+
         if ids is not None:
             # Check if the number of IDs matches the number of documents
             if len(ids) != len(input):
@@ -1344,6 +1362,8 @@ class LightRAG:
             unique_contents = {}
             for id_, doc, path in zip(ids, input, file_paths):
                 cleaned_content = sanitize_text_for_encoding(doc)
+                if use_indo_preprocess:
+                    cleaned_content = preprocess_indonesian_text(cleaned_content)
                 if cleaned_content not in unique_contents:
                     unique_contents[cleaned_content] = (id_, path)
 
@@ -1357,6 +1377,8 @@ class LightRAG:
             unique_content_with_paths = {}
             for doc, path in zip(input, file_paths):
                 cleaned_content = sanitize_text_for_encoding(doc)
+                if use_indo_preprocess:
+                    cleaned_content = preprocess_indonesian_text(cleaned_content)
                 if cleaned_content not in unique_content_with_paths:
                     unique_content_with_paths[cleaned_content] = path
 
@@ -2868,7 +2890,7 @@ class LightRAG:
                         "mode": param.mode,
                     },
                     "llm_response": {
-                        "content": PROMPTS["fail_response"],
+                        "content": (PROMPTS_ID if self.addon_params.get("use_indonesian_prompts", False) else PROMPTS)["fail_response"],
                         "response_iterator": None,
                         "is_streaming": False,
                     },

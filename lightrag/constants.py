@@ -40,6 +40,23 @@ DEFAULT_ENTITY_TYPES = [
     "NaturalObject",
 ]
 
+# Fact-checking entity types adapted from TrumorGPT (domain-specific typed nodes)
+# and GraphFC (typed constraint approach) for Indonesian news fact-checking.
+# Used when USE_FACTCHECK_ENTITIES=true
+FACTCHECK_ENTITY_TYPES = [
+    "Orang",
+    "Organisasi",
+    "Lokasi",
+    "Peristiwa",
+    "Klaim",
+    "Sumber_Bukti",
+    "Pernyataan",
+    "Waktu",
+    "Kuantitas",
+    "Regulasi",
+    "Media",
+]
+
 # Separator for: description, source_id and relation-key fields(Can not be changed after data inserted)
 GRAPH_FIELD_SEP = "<SEP>"
 

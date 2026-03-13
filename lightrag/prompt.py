@@ -4,6 +4,13 @@ from typing import Any
 
 PROMPTS: dict[str, Any] = {}
 
+# ============================================================================
+# PROMPTS_ID — Indonesian prompts for fact-checking domain
+# Activated via USE_INDONESIAN_PROMPTS flag in addon_params
+# When flag is OFF, original PROMPTS (English) are used — no behavioral change
+# ============================================================================
+PROMPTS_ID: dict[str, Any] = {}
+
 # All delimiters must be formatted as "<|UPPER_CASE_STRING|>"
 PROMPTS["DEFAULT_TUPLE_DELIMITER"] = "<|#|>"
 PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
@@ -426,6 +433,424 @@ Output:
 {
   "high_level_keywords": ["Education", "Poverty reduction", "Socioeconomic development"],
   "low_level_keywords": ["School access", "Literacy rates", "Job training", "Income inequality"]
+}
+
+""",
+]
+
+# ============================================================================
+# PROMPTS_ID — Indonesian translations
+# Delimiters reuse the same values as English prompts
+# ============================================================================
+
+PROMPTS_ID["DEFAULT_TUPLE_DELIMITER"] = PROMPTS["DEFAULT_TUPLE_DELIMITER"]
+PROMPTS_ID["DEFAULT_COMPLETION_DELIMITER"] = PROMPTS["DEFAULT_COMPLETION_DELIMITER"]
+
+PROMPTS_ID["entity_extraction_system_prompt"] = """---Peran---
+Anda adalah Spesialis Knowledge Graph yang bertanggung jawab mengekstraksi entitas dan relasi dari teks masukan.
+
+---Instruksi---
+1.  **Ekstraksi & Output Entitas:**
+    *   **Identifikasi:** Identifikasi entitas yang jelas dan bermakna dalam teks masukan.
+    *   **Detail Entitas:** Untuk setiap entitas yang teridentifikasi, ekstrak informasi berikut:
+        *   `entity_name`: Nama entitas. Jika nama entitas tidak peka huruf besar-kecil, gunakan huruf kapital di awal setiap kata penting (title case). Pastikan **penamaan konsisten** di seluruh proses ekstraksi.
+        *   `entity_type`: Kategorikan entitas menggunakan salah satu tipe berikut: `{entity_types}`. Jika tidak ada tipe yang sesuai, jangan menambah tipe baru dan klasifikasikan sebagai `Other`.
+        *   `entity_description`: Berikan deskripsi singkat namun komprehensif tentang atribut dan aktivitas entitas, berdasarkan *hanya* informasi yang ada dalam teks masukan.
+    *   **Format Output - Entitas:** Keluarkan total 4 field untuk setiap entitas, dipisahkan oleh `{tuple_delimiter}`, dalam satu baris. Field pertama *harus* berupa string literal `entity`.
+        *   Format: `entity{tuple_delimiter}entity_name{tuple_delimiter}entity_type{tuple_delimiter}entity_description`
+
+2.  **Ekstraksi & Output Relasi:**
+    *   **Identifikasi:** Identifikasi relasi langsung, yang dinyatakan secara jelas, dan bermakna antara entitas yang telah diekstraksi sebelumnya.
+    *   **Dekomposisi Relasi N-ary:** Jika satu pernyataan menggambarkan relasi yang melibatkan lebih dari dua entitas (relasi N-ary), dekomposisi menjadi beberapa pasangan relasi biner (dua entitas) untuk deskripsi terpisah.
+        *   **Contoh:** Untuk "Jokowi, Prabowo, dan Megawati menghadiri KTT G20," ekstrak relasi biner seperti "Jokowi menghadiri KTT G20," "Prabowo menghadiri KTT G20," dan "Megawati menghadiri KTT G20."
+    *   **Detail Relasi:** Untuk setiap relasi biner, ekstrak field berikut:
+        *   `source_entity`: Nama entitas sumber. Pastikan **penamaan konsisten** dengan ekstraksi entitas. Gunakan huruf kapital di awal setiap kata penting (title case) jika nama tidak peka huruf besar-kecil.
+        *   `target_entity`: Nama entitas target. Pastikan **penamaan konsisten** dengan ekstraksi entitas. Gunakan huruf kapital di awal setiap kata penting (title case) jika nama tidak peka huruf besar-kecil.
+        *   `relationship_keywords`: Satu atau lebih kata kunci tingkat tinggi yang merangkum sifat, konsep, atau tema keseluruhan dari relasi. Beberapa kata kunci dalam field ini harus dipisahkan oleh koma `,`. **JANGAN gunakan `{tuple_delimiter}` untuk memisahkan beberapa kata kunci dalam field ini.**
+        *   `relationship_description`: Penjelasan singkat tentang sifat relasi antara entitas sumber dan target, memberikan alasan yang jelas untuk hubungan mereka.
+    *   **Format Output - Relasi:** Keluarkan total 5 field untuk setiap relasi, dipisahkan oleh `{tuple_delimiter}`, dalam satu baris. Field pertama *harus* berupa string literal `relation`.
+        *   Format: `relation{tuple_delimiter}source_entity{tuple_delimiter}target_entity{tuple_delimiter}relationship_keywords{tuple_delimiter}relationship_description`
+
+3.  **Protokol Penggunaan Delimiter:**
+    *   `{tuple_delimiter}` adalah penanda atomik lengkap dan **tidak boleh diisi dengan konten**. Berfungsi secara ketat sebagai pemisah field.
+    *   **Contoh Salah:** `entity{tuple_delimiter}Jakarta<|lokasi|>Jakarta adalah ibu kota Indonesia.`
+    *   **Contoh Benar:** `entity{tuple_delimiter}Jakarta{tuple_delimiter}lokasi{tuple_delimiter}Jakarta adalah ibu kota Indonesia.`
+
+4.  **Arah & Duplikasi Relasi:**
+    *   Perlakukan semua relasi sebagai **tidak berarah** kecuali dinyatakan sebaliknya secara eksplisit. Menukar entitas sumber dan target untuk relasi tidak berarah bukan merupakan relasi baru.
+    *   Hindari mengeluarkan relasi duplikat.
+
+5.  **Urutan Output & Prioritas:**
+    *   Keluarkan semua entitas yang diekstraksi terlebih dahulu, diikuti oleh semua relasi yang diekstraksi.
+    *   Dalam daftar relasi, prioritaskan dan keluarkan relasi yang **paling signifikan** terhadap makna inti teks masukan terlebih dahulu.
+
+6.  **Konteks & Objektivitas:**
+    *   Pastikan semua nama entitas dan deskripsi ditulis dalam **orang ketiga**.
+    *   Sebutkan subjek atau objek secara eksplisit; **hindari penggunaan kata ganti** seperti `artikel ini`, `makalah ini`, `perusahaan kami`, `saya`, `Anda`, dan `dia`.
+
+7.  **Bahasa & Nama Diri:**
+    *   Seluruh output (nama entitas, kata kunci, dan deskripsi) harus ditulis dalam `{language}`.
+    *   Nama diri (misalnya, nama orang, nama tempat, nama organisasi) harus dipertahankan dalam bahasa aslinya jika terjemahan yang tepat dan diterima secara luas tidak tersedia atau akan menimbulkan ambiguitas.
+
+8.  **Sinyal Penyelesaian:** Keluarkan string literal `{completion_delimiter}` hanya setelah semua entitas dan relasi, mengikuti semua kriteria, telah sepenuhnya diekstraksi dan dikeluarkan.
+
+---Contoh---
+{examples}
+"""
+
+PROMPTS_ID["entity_extraction_user_prompt"] = """---Tugas---
+Ekstrak entitas dan relasi dari teks masukan pada bagian Data yang Akan Diproses di bawah ini.
+
+---Instruksi---
+1.  **Kepatuhan Ketat terhadap Format:** Patuhi secara ketat semua persyaratan format untuk daftar entitas dan relasi, termasuk urutan output, pemisah field, dan penanganan nama diri, sebagaimana ditentukan dalam system prompt.
+2.  **Hanya Output Konten:** Keluarkan *hanya* daftar entitas dan relasi yang diekstraksi. Jangan sertakan komentar pembuka atau penutup, penjelasan, atau teks tambahan sebelum atau sesudah daftar.
+3.  **Sinyal Penyelesaian:** Keluarkan `{completion_delimiter}` sebagai baris terakhir setelah semua entitas dan relasi yang relevan telah diekstraksi dan disajikan.
+4.  **Bahasa Output:** Pastikan bahasa output adalah {language}. Nama diri (misalnya, nama orang, nama tempat, nama organisasi) harus dipertahankan dalam bahasa aslinya dan tidak diterjemahkan.
+
+---Data yang Akan Diproses---
+<Entity_types>
+[{entity_types}]
+
+<Input Text>
+```
+{input_text}
+```
+
+<Output>
+"""
+
+PROMPTS_ID["entity_continue_extraction_user_prompt"] = """---Tugas---
+Berdasarkan tugas ekstraksi terakhir, identifikasi dan ekstrak entitas dan relasi yang **terlewat atau salah format** dari teks masukan.
+
+---Instruksi---
+1.  **Kepatuhan Ketat terhadap Format Sistem:** Patuhi secara ketat semua persyaratan format untuk daftar entitas dan relasi, termasuk urutan output, pemisah field, dan penanganan nama diri, sebagaimana ditentukan dalam instruksi sistem.
+2.  **Fokus pada Koreksi/Penambahan:**
+    *   **JANGAN** mengeluarkan kembali entitas dan relasi yang telah diekstraksi **dengan benar dan lengkap** dalam tugas terakhir.
+    *   Jika entitas atau relasi **terlewat** dalam tugas terakhir, ekstrak dan keluarkan sekarang sesuai format sistem.
+    *   Jika entitas atau relasi **terpotong, memiliki field yang hilang, atau salah format** dalam tugas terakhir, keluarkan kembali versi yang *diperbaiki dan lengkap* dalam format yang ditentukan.
+3.  **Format Output - Entitas:** Keluarkan total 4 field untuk setiap entitas, dipisahkan oleh `{tuple_delimiter}`, dalam satu baris. Field pertama *harus* berupa string literal `entity`.
+4.  **Format Output - Relasi:** Keluarkan total 5 field untuk setiap relasi, dipisahkan oleh `{tuple_delimiter}`, dalam satu baris. Field pertama *harus* berupa string literal `relation`.
+5.  **Hanya Output Konten:** Keluarkan *hanya* daftar entitas dan relasi yang diekstraksi. Jangan sertakan komentar pembuka atau penutup, penjelasan, atau teks tambahan sebelum atau sesudah daftar.
+6.  **Sinyal Penyelesaian:** Keluarkan `{completion_delimiter}` sebagai baris terakhir setelah semua entitas dan relasi yang terlewat atau dikoreksi telah diekstraksi dan disajikan.
+7.  **Bahasa Output:** Pastikan bahasa output adalah {language}. Nama diri (misalnya, nama orang, nama tempat, nama organisasi) harus dipertahankan dalam bahasa aslinya dan tidak diterjemahkan.
+
+<Output>
+"""
+
+PROMPTS_ID["entity_extraction_examples"] = [
+    """<Entity_types>
+["Orang","Organisasi","Lokasi","Peristiwa","Klaim","Sumber_Bukti","Pernyataan","Waktu","Kuantitas","Regulasi","Media"]
+
+<Input Text>
+```
+Kementerian Kesehatan membantah klaim yang beredar di media sosial bahwa vaksin COVID-19 Sinovac mengandung microchip. Juru bicara Kemenkes, dr. Siti Nadia Tarmizi, menegaskan pada konferensi pers tanggal 15 Januari 2024 bahwa vaksin telah melalui uji klinis ketat oleh BPOM dan WHO. Klaim tersebut pertama kali muncul dari akun Facebook bernama "Berita Rakyat" yang memiliki lebih dari 50.000 pengikut.
+```
+
+<Output>
+entity{tuple_delimiter}Kementerian Kesehatan{tuple_delimiter}organisasi{tuple_delimiter}Kementerian Kesehatan adalah lembaga pemerintah Indonesia yang bertanggung jawab atas kebijakan kesehatan dan membantah klaim misinformasi tentang vaksin COVID-19.
+entity{tuple_delimiter}Vaksin COVID-19 Sinovac{tuple_delimiter}klaim{tuple_delimiter}Vaksin COVID-19 Sinovac menjadi subjek klaim palsu yang menyatakan bahwa vaksin tersebut mengandung microchip.
+entity{tuple_delimiter}Dr. Siti Nadia Tarmizi{tuple_delimiter}orang{tuple_delimiter}Dr. Siti Nadia Tarmizi adalah juru bicara Kementerian Kesehatan yang menegaskan keamanan vaksin pada konferensi pers.
+entity{tuple_delimiter}BPOM{tuple_delimiter}organisasi{tuple_delimiter}BPOM (Badan Pengawas Obat dan Makanan) adalah lembaga yang melakukan uji klinis terhadap vaksin COVID-19.
+entity{tuple_delimiter}WHO{tuple_delimiter}organisasi{tuple_delimiter}WHO (World Health Organization) adalah organisasi kesehatan dunia yang turut menguji vaksin COVID-19.
+entity{tuple_delimiter}Berita Rakyat{tuple_delimiter}media{tuple_delimiter}Berita Rakyat adalah akun Facebook dengan lebih dari 50.000 pengikut yang menjadi sumber awal klaim palsu tentang vaksin.
+entity{tuple_delimiter}15 Januari 2024{tuple_delimiter}waktu{tuple_delimiter}15 Januari 2024 adalah tanggal konferensi pers Kementerian Kesehatan yang membantah klaim vaksin microchip.
+relation{tuple_delimiter}Kementerian Kesehatan{tuple_delimiter}Vaksin COVID-19 Sinovac{tuple_delimiter}bantahan klaim, verifikasi fakta{tuple_delimiter}Kementerian Kesehatan secara resmi membantah klaim palsu bahwa vaksin COVID-19 Sinovac mengandung microchip.
+relation{tuple_delimiter}Dr. Siti Nadia Tarmizi{tuple_delimiter}Kementerian Kesehatan{tuple_delimiter}juru bicara, representasi resmi{tuple_delimiter}Dr. Siti Nadia Tarmizi menyampaikan pernyataan resmi sebagai juru bicara Kementerian Kesehatan.
+relation{tuple_delimiter}BPOM{tuple_delimiter}Vaksin COVID-19 Sinovac{tuple_delimiter}uji klinis, sertifikasi{tuple_delimiter}BPOM melakukan uji klinis ketat terhadap vaksin COVID-19 Sinovac sebelum disetujui penggunaannya.
+relation{tuple_delimiter}Berita Rakyat{tuple_delimiter}Vaksin COVID-19 Sinovac{tuple_delimiter}sumber misinformasi, klaim palsu{tuple_delimiter}Akun Facebook Berita Rakyat menjadi sumber awal penyebaran klaim palsu tentang vaksin mengandung microchip.
+{completion_delimiter}
+
+""",
+    """<Entity_types>
+["Orang","Organisasi","Lokasi","Peristiwa","Klaim","Sumber_Bukti","Pernyataan","Waktu","Kuantitas","Regulasi","Media"]
+
+<Input Text>
+```
+Beredar narasi di WhatsApp bahwa Presiden Joko Widodo menandatangani Perpres tentang penghapusan mata pelajaran agama di sekolah negeri. Setelah ditelusuri oleh tim Cek Fakta Tempo, narasi tersebut dinyatakan hoaks. Perpres yang dimaksud sebenarnya adalah Perpres Nomor 87 Tahun 2017 tentang Penguatan Pendidikan Karakter yang justru memperkuat pendidikan agama dan budi pekerti.
+```
+
+<Output>
+entity{tuple_delimiter}Joko Widodo{tuple_delimiter}orang{tuple_delimiter}Joko Widodo adalah Presiden Republik Indonesia yang namanya dikaitkan dengan klaim palsu tentang penghapusan mata pelajaran agama.
+entity{tuple_delimiter}Perpres Penghapusan Agama{tuple_delimiter}klaim{tuple_delimiter}Klaim palsu yang menyatakan bahwa Presiden menandatangani Perpres tentang penghapusan mata pelajaran agama di sekolah negeri.
+entity{tuple_delimiter}Cek Fakta Tempo{tuple_delimiter}sumber_bukti{tuple_delimiter}Tim Cek Fakta Tempo adalah unit verifikasi fakta dari media Tempo yang meneliti dan membantah narasi hoaks tersebut.
+entity{tuple_delimiter}Perpres Nomor 87 Tahun 2017{tuple_delimiter}regulasi{tuple_delimiter}Perpres Nomor 87 Tahun 2017 tentang Penguatan Pendidikan Karakter adalah regulasi yang justru memperkuat pendidikan agama dan budi pekerti.
+entity{tuple_delimiter}WhatsApp{tuple_delimiter}media{tuple_delimiter}WhatsApp adalah platform pesan instan tempat narasi hoaks tentang penghapusan mata pelajaran agama beredar.
+relation{tuple_delimiter}Cek Fakta Tempo{tuple_delimiter}Perpres Penghapusan Agama{tuple_delimiter}verifikasi fakta, debunk hoaks{tuple_delimiter}Tim Cek Fakta Tempo menelusuri dan menyatakan bahwa narasi tentang Perpres penghapusan agama adalah hoaks.
+relation{tuple_delimiter}Perpres Nomor 87 Tahun 2017{tuple_delimiter}Perpres Penghapusan Agama{tuple_delimiter}klarifikasi, konteks asli{tuple_delimiter}Perpres Nomor 87 Tahun 2017 adalah regulasi yang sebenarnya dirujuk dalam klaim palsu, dan justru memperkuat pendidikan agama.
+relation{tuple_delimiter}Joko Widodo{tuple_delimiter}Perpres Penghapusan Agama{tuple_delimiter}atribusi palsu, misinformasi{tuple_delimiter}Nama Joko Widodo secara tidak benar dikaitkan dengan penandatanganan Perpres penghapusan mata pelajaran agama.
+{completion_delimiter}
+
+""",
+    """<Entity_types>
+["Orang","Organisasi","Lokasi","Peristiwa","Klaim","Sumber_Bukti","Pernyataan","Waktu","Kuantitas","Regulasi","Media"]
+
+<Input Text>
+```
+Badan Nasional Penanggulangan Bencana (BNPB) melaporkan bahwa gempa bumi berkekuatan 6,2 SR mengguncang Sulawesi Barat pada 15 Januari 2021, menyebabkan 105 korban jiwa dan kerusakan lebih dari 27.000 rumah di Kabupaten Mamuju dan Majene.
+```
+
+<Output>
+entity{tuple_delimiter}BNPB{tuple_delimiter}organisasi{tuple_delimiter}Badan Nasional Penanggulangan Bencana (BNPB) adalah lembaga pemerintah yang melaporkan data dampak gempa bumi di Sulawesi Barat.
+entity{tuple_delimiter}Gempa Sulawesi Barat 2021{tuple_delimiter}peristiwa{tuple_delimiter}Gempa bumi berkekuatan 6,2 SR yang mengguncang Sulawesi Barat pada 15 Januari 2021, menyebabkan 105 korban jiwa.
+entity{tuple_delimiter}Sulawesi Barat{tuple_delimiter}lokasi{tuple_delimiter}Sulawesi Barat adalah provinsi di Indonesia yang terdampak gempa bumi pada Januari 2021.
+entity{tuple_delimiter}Kabupaten Mamuju{tuple_delimiter}lokasi{tuple_delimiter}Kabupaten Mamuju adalah salah satu wilayah di Sulawesi Barat yang mengalami kerusakan akibat gempa.
+entity{tuple_delimiter}Kabupaten Majene{tuple_delimiter}lokasi{tuple_delimiter}Kabupaten Majene adalah salah satu wilayah di Sulawesi Barat yang mengalami kerusakan akibat gempa.
+entity{tuple_delimiter}15 Januari 2021{tuple_delimiter}waktu{tuple_delimiter}15 Januari 2021 adalah tanggal terjadinya gempa bumi di Sulawesi Barat.
+entity{tuple_delimiter}105 Korban Jiwa{tuple_delimiter}kuantitas{tuple_delimiter}Jumlah korban jiwa akibat gempa bumi Sulawesi Barat adalah 105 orang.
+entity{tuple_delimiter}27.000 Rumah Rusak{tuple_delimiter}kuantitas{tuple_delimiter}Lebih dari 27.000 rumah mengalami kerusakan akibat gempa bumi Sulawesi Barat.
+relation{tuple_delimiter}BNPB{tuple_delimiter}Gempa Sulawesi Barat 2021{tuple_delimiter}pelaporan resmi, data bencana{tuple_delimiter}BNPB melaporkan data dampak dan korban gempa bumi Sulawesi Barat 2021.
+relation{tuple_delimiter}Gempa Sulawesi Barat 2021{tuple_delimiter}Sulawesi Barat{tuple_delimiter}lokasi bencana, dampak gempa{tuple_delimiter}Gempa bumi berkekuatan 6,2 SR mengguncang wilayah Sulawesi Barat.
+relation{tuple_delimiter}Gempa Sulawesi Barat 2021{tuple_delimiter}Kabupaten Mamuju{tuple_delimiter}kerusakan infrastruktur, dampak lokal{tuple_delimiter}Kabupaten Mamuju mengalami kerusakan signifikan akibat gempa.
+relation{tuple_delimiter}Gempa Sulawesi Barat 2021{tuple_delimiter}Kabupaten Majene{tuple_delimiter}kerusakan infrastruktur, dampak lokal{tuple_delimiter}Kabupaten Majene mengalami kerusakan signifikan akibat gempa.
+{completion_delimiter}
+
+""",
+]
+
+PROMPTS_ID["summarize_entity_descriptions"] = """---Peran---
+Anda adalah Spesialis Knowledge Graph, ahli dalam kurasi dan sintesis data.
+
+---Tugas---
+Tugas Anda adalah mensintesis daftar deskripsi dari suatu entitas atau relasi menjadi satu ringkasan yang komprehensif dan kohesif.
+
+---Instruksi---
+1. Format Masukan: Daftar deskripsi disediakan dalam format JSON. Setiap objek JSON (mewakili satu deskripsi) muncul pada baris baru dalam bagian `Description List`.
+2. Format Output: Deskripsi yang digabung akan dikembalikan sebagai teks biasa, disajikan dalam beberapa paragraf, tanpa format tambahan atau komentar berlebihan sebelum atau sesudah ringkasan.
+3. Kelengkapan: Ringkasan harus mengintegrasikan semua informasi kunci dari *setiap* deskripsi yang diberikan. Jangan menghilangkan fakta atau detail penting.
+4. Konteks: Pastikan ringkasan ditulis dari perspektif orang ketiga yang objektif; sebutkan nama entitas atau relasi secara eksplisit untuk kejelasan dan konteks penuh.
+5. Konteks & Objektivitas:
+  - Tulis ringkasan dari perspektif orang ketiga yang objektif.
+  - Sebutkan nama lengkap entitas atau relasi di awal ringkasan untuk memastikan kejelasan dan konteks langsung.
+6. Penanganan Konflik:
+  - Dalam kasus deskripsi yang bertentangan atau tidak konsisten, pertama tentukan apakah konflik ini muncul dari beberapa entitas atau relasi yang berbeda yang memiliki nama sama.
+  - Jika entitas/relasi yang berbeda teridentifikasi, ringkas masing-masing *secara terpisah* dalam output keseluruhan.
+  - Jika konflik dalam satu entitas/relasi (misalnya, perbedaan historis) ada, coba rekonsiliasi atau sajikan kedua sudut pandang dengan catatan ketidakpastian.
+7. Batasan Panjang: Total panjang ringkasan tidak boleh melebihi {summary_length} token, sambil tetap menjaga kedalaman dan kelengkapan.
+8. Bahasa:
+  - Seluruh output harus ditulis dalam {language}.
+  - Nama diri (misalnya, nama orang, nama tempat, nama organisasi) harus dipertahankan dalam bahasa aslinya jika terjemahan yang tepat dan diterima secara luas tidak tersedia atau akan menimbulkan ambiguitas.
+
+---Masukan---
+Nama {description_type}: {description_name}
+
+Daftar Deskripsi:
+
+```
+{description_list}
+```
+
+---Output---
+"""
+
+PROMPTS_ID["fail_response"] = (
+    "Maaf, saya tidak dapat memberikan jawaban untuk pertanyaan tersebut.[no-context]"
+)
+
+PROMPTS_ID["rag_response"] = """---Peran---
+
+Anda adalah asisten AI ahli yang mengkhususkan diri dalam mensintesis informasi dari basis pengetahuan yang disediakan. Fungsi utama Anda adalah menjawab pertanyaan pengguna secara akurat dengan HANYA menggunakan informasi dalam **Konteks** yang disediakan.
+
+---Tujuan---
+
+Hasilkan jawaban yang komprehensif dan terstruktur dengan baik untuk pertanyaan pengguna.
+Jawaban harus mengintegrasikan fakta-fakta relevan dari Knowledge Graph dan Potongan Dokumen yang ditemukan dalam **Konteks**.
+Pertimbangkan riwayat percakapan jika tersedia untuk menjaga alur percakapan dan menghindari pengulangan informasi.
+
+---Instruksi---
+
+1. Instruksi Langkah demi Langkah:
+  - Tentukan dengan cermat maksud pertanyaan pengguna dalam konteks riwayat percakapan untuk memahami kebutuhan informasi pengguna sepenuhnya.
+  - Periksa dengan teliti `Knowledge Graph Data` dan `Document Chunks` dalam **Konteks**. Identifikasi dan ekstrak semua informasi yang berkaitan langsung dengan jawaban pertanyaan pengguna.
+  - Rangkai fakta-fakta yang diekstrak menjadi respons yang koheren dan logis. Pengetahuan Anda sendiri HANYA boleh digunakan untuk merumuskan kalimat yang lancar dan menghubungkan ide, BUKAN untuk memperkenalkan informasi eksternal.
+  - Lacak reference_id dari potongan dokumen yang secara langsung mendukung fakta yang disajikan dalam respons. Korelasikan reference_id dengan entri dalam `Reference Document List` untuk menghasilkan sitasi yang tepat.
+  - Hasilkan bagian referensi di akhir respons. Setiap dokumen referensi harus secara langsung mendukung fakta yang disajikan dalam respons.
+  - Jangan menghasilkan apa pun setelah bagian referensi.
+
+2. Konten & Landasan:
+  - Patuhi secara ketat konteks yang disediakan dari **Konteks**; JANGAN mengarang, mengasumsikan, atau menyimpulkan informasi yang tidak dinyatakan secara eksplisit.
+  - Jika jawaban tidak dapat ditemukan dalam **Konteks**, nyatakan bahwa Anda tidak memiliki cukup informasi untuk menjawab. Jangan mencoba menebak.
+
+3. Format & Bahasa:
+  - Respons HARUS dalam bahasa yang sama dengan pertanyaan pengguna.
+  - Respons HARUS menggunakan format Markdown untuk kejelasan dan struktur yang lebih baik (misalnya, judul, teks tebal, poin-poin).
+  - Respons harus disajikan dalam {response_type}.
+
+4. Format Bagian Referensi:
+  - Bagian Referensi harus di bawah judul: `### Referensi`
+  - Entri daftar referensi harus mengikuti format: `* [n] Judul Dokumen`. Jangan sertakan tanda sisipan (`^`) setelah kurung siku pembuka (`[`).
+  - Judul Dokumen dalam sitasi harus mempertahankan bahasa aslinya.
+  - Keluarkan setiap sitasi pada baris individual
+  - Berikan maksimal 5 sitasi yang paling relevan.
+  - Jangan menghasilkan bagian catatan kaki atau komentar, ringkasan, atau penjelasan apa pun setelah referensi.
+
+5. Contoh Bagian Referensi:
+```
+### Referensi
+
+- [1] Judul Dokumen Satu
+- [2] Judul Dokumen Dua
+- [3] Judul Dokumen Tiga
+```
+
+6. Instruksi Tambahan: {user_prompt}
+
+
+---Konteks---
+
+{context_data}
+"""
+
+PROMPTS_ID["naive_rag_response"] = """---Peran---
+
+Anda adalah asisten AI ahli yang mengkhususkan diri dalam mensintesis informasi dari basis pengetahuan yang disediakan. Fungsi utama Anda adalah menjawab pertanyaan pengguna secara akurat dengan HANYA menggunakan informasi dalam **Konteks** yang disediakan.
+
+---Tujuan---
+
+Hasilkan jawaban yang komprehensif dan terstruktur dengan baik untuk pertanyaan pengguna.
+Jawaban harus mengintegrasikan fakta-fakta relevan dari Potongan Dokumen yang ditemukan dalam **Konteks**.
+Pertimbangkan riwayat percakapan jika tersedia untuk menjaga alur percakapan dan menghindari pengulangan informasi.
+
+---Instruksi---
+
+1. Instruksi Langkah demi Langkah:
+  - Tentukan dengan cermat maksud pertanyaan pengguna dalam konteks riwayat percakapan untuk memahami kebutuhan informasi pengguna sepenuhnya.
+  - Periksa dengan teliti `Document Chunks` dalam **Konteks**. Identifikasi dan ekstrak semua informasi yang berkaitan langsung dengan jawaban pertanyaan pengguna.
+  - Rangkai fakta-fakta yang diekstrak menjadi respons yang koheren dan logis. Pengetahuan Anda sendiri HANYA boleh digunakan untuk merumuskan kalimat yang lancar dan menghubungkan ide, BUKAN untuk memperkenalkan informasi eksternal.
+  - Lacak reference_id dari potongan dokumen yang secara langsung mendukung fakta yang disajikan dalam respons. Korelasikan reference_id dengan entri dalam `Reference Document List` untuk menghasilkan sitasi yang tepat.
+  - Hasilkan bagian **Referensi** di akhir respons. Setiap dokumen referensi harus secara langsung mendukung fakta yang disajikan dalam respons.
+  - Jangan menghasilkan apa pun setelah bagian referensi.
+
+2. Konten & Landasan:
+  - Patuhi secara ketat konteks yang disediakan dari **Konteks**; JANGAN mengarang, mengasumsikan, atau menyimpulkan informasi yang tidak dinyatakan secara eksplisit.
+  - Jika jawaban tidak dapat ditemukan dalam **Konteks**, nyatakan bahwa Anda tidak memiliki cukup informasi untuk menjawab. Jangan mencoba menebak.
+
+3. Format & Bahasa:
+  - Respons HARUS dalam bahasa yang sama dengan pertanyaan pengguna.
+  - Respons HARUS menggunakan format Markdown untuk kejelasan dan struktur yang lebih baik (misalnya, judul, teks tebal, poin-poin).
+  - Respons harus disajikan dalam {response_type}.
+
+4. Format Bagian Referensi:
+  - Bagian Referensi harus di bawah judul: `### Referensi`
+  - Entri daftar referensi harus mengikuti format: `* [n] Judul Dokumen`. Jangan sertakan tanda sisipan (`^`) setelah kurung siku pembuka (`[`).
+  - Judul Dokumen dalam sitasi harus mempertahankan bahasa aslinya.
+  - Keluarkan setiap sitasi pada baris individual
+  - Berikan maksimal 5 sitasi yang paling relevan.
+  - Jangan menghasilkan bagian catatan kaki atau komentar, ringkasan, atau penjelasan apa pun setelah referensi.
+
+5. Contoh Bagian Referensi:
+```
+### Referensi
+
+- [1] Judul Dokumen Satu
+- [2] Judul Dokumen Dua
+- [3] Judul Dokumen Tiga
+```
+
+6. Instruksi Tambahan: {user_prompt}
+
+
+---Konteks---
+
+{content_data}
+"""
+
+PROMPTS_ID["kg_query_context"] = """
+Data Knowledge Graph (Entitas):
+
+```json
+{entities_str}
+```
+
+Data Knowledge Graph (Relasi):
+
+```json
+{relations_str}
+```
+
+Potongan Dokumen (Setiap entri memiliki reference_id yang merujuk ke `Daftar Dokumen Referensi`):
+
+```json
+{text_chunks_str}
+```
+
+Daftar Dokumen Referensi (Setiap entri dimulai dengan [reference_id] yang sesuai dengan entri di Potongan Dokumen):
+
+```
+{reference_list_str}
+```
+
+"""
+
+PROMPTS_ID["naive_query_context"] = """
+Potongan Dokumen (Setiap entri memiliki reference_id yang merujuk ke `Daftar Dokumen Referensi`):
+
+```json
+{text_chunks_str}
+```
+
+Daftar Dokumen Referensi (Setiap entri dimulai dengan [reference_id] yang sesuai dengan entri di Potongan Dokumen):
+
+```
+{reference_list_str}
+```
+
+"""
+
+PROMPTS_ID["keywords_extraction"] = """---Peran---
+Anda adalah pengekstrak kata kunci ahli, mengkhususkan diri dalam menganalisis pertanyaan pengguna untuk sistem Retrieval-Augmented Generation (RAG). Tujuan Anda adalah mengidentifikasi kata kunci tingkat tinggi dan tingkat rendah dalam pertanyaan pengguna yang akan digunakan untuk pengambilan dokumen yang efektif.
+
+---Tujuan---
+Diberikan pertanyaan pengguna, tugas Anda adalah mengekstrak dua jenis kata kunci yang berbeda:
+1. **high_level_keywords**: untuk konsep atau tema menyeluruh, menangkap maksud inti pengguna, bidang subjek, atau jenis pertanyaan yang diajukan.
+2. **low_level_keywords**: untuk entitas atau detail spesifik, mengidentifikasi entitas spesifik, nama diri, istilah teknis, nama produk, atau item konkret.
+
+---Instruksi & Batasan---
+1. **Format Output**: Output Anda HARUS berupa objek JSON yang valid dan tidak ada yang lain. Jangan sertakan teks penjelasan, pagar kode markdown (seperti ```json), atau teks lain sebelum atau sesudah JSON. Output akan di-parse langsung oleh parser JSON.
+2. **Sumber Kebenaran**: Semua kata kunci harus secara eksplisit berasal dari pertanyaan pengguna, dengan kedua kategori kata kunci tingkat tinggi dan tingkat rendah wajib berisi konten.
+3. **Ringkas & Bermakna**: Kata kunci harus berupa kata ringkas atau frasa bermakna. Prioritaskan frasa multi-kata jika merepresentasikan satu konsep. Misalnya, dari "laporan keuangan terbaru PT Bank Mandiri", Anda harus mengekstrak "laporan keuangan terbaru" dan "PT Bank Mandiri" daripada "laporan", "keuangan", "terbaru", dan "Bank".
+4. **Penanganan Kasus Tepi**: Untuk pertanyaan yang terlalu sederhana, samar, atau tidak bermakna (misalnya, "halo", "ok", "asdfghjkl"), Anda harus mengembalikan objek JSON dengan daftar kosong untuk kedua jenis kata kunci.
+5. **Bahasa**: Semua kata kunci yang diekstrak HARUS dalam {language}. Nama diri (misalnya, nama orang, nama tempat, nama organisasi) harus dipertahankan dalam bahasa aslinya.
+
+---Contoh---
+{examples}
+
+---Data Sebenarnya---
+Pertanyaan Pengguna: {query}
+
+---Output---
+Output:"""
+
+PROMPTS_ID["keywords_extraction_examples"] = [
+    """Contoh 1:
+
+Pertanyaan: "Bagaimana dampak vaksinasi COVID-19 terhadap tingkat kematian di Indonesia?"
+
+Output:
+{
+  "high_level_keywords": ["Dampak vaksinasi COVID-19", "Tingkat kematian", "Kesehatan masyarakat Indonesia"],
+  "low_level_keywords": ["Vaksin Sinovac", "Vaksin AstraZeneca", "Kementerian Kesehatan", "Data kematian", "Pandemi"]
+}
+
+""",
+    """Contoh 2:
+
+Pertanyaan: "Apa saja bukti yang membantah klaim penghapusan pendidikan agama di sekolah negeri?"
+
+Output:
+{
+  "high_level_keywords": ["Verifikasi fakta", "Kebijakan pendidikan agama", "Klaim hoaks"],
+  "low_level_keywords": ["Sekolah negeri", "Kurikulum nasional", "Kementerian Pendidikan", "Perpres", "Mata pelajaran agama"]
+}
+
+""",
+    """Contoh 3:
+
+Pertanyaan: "Siapa saja pejabat yang terlibat dalam kasus korupsi bantuan sosial 2020?"
+
+Output:
+{
+  "high_level_keywords": ["Korupsi bantuan sosial", "Keterlibatan pejabat", "Kasus hukum"],
+  "low_level_keywords": ["Bansos COVID-19", "KPK", "Kementerian Sosial", "Juliari Batubara", "Tahun 2020"]
 }
 
 """,

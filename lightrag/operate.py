@@ -49,7 +49,7 @@ from lightrag.base import (
     QueryResult,
     QueryContextResult,
 )
-from lightrag.prompt import PROMPTS
+from lightrag.prompt import PROMPTS, PROMPTS_ID
 from lightrag.constants import (
     GRAPH_FIELD_SEP,
     DEFAULT_MAX_ENTITY_TOKENS,
@@ -58,6 +58,7 @@ from lightrag.constants import (
     DEFAULT_RELATED_CHUNK_NUMBER,
     DEFAULT_KG_CHUNK_PICK_METHOD,
     DEFAULT_ENTITY_TYPES,
+    FACTCHECK_ENTITY_TYPES,
     DEFAULT_SUMMARY_LANGUAGE,
     SOURCE_IDS_LIMIT_METHOD_KEEP,
     SOURCE_IDS_LIMIT_METHOD_FIFO,
@@ -73,6 +74,31 @@ from dotenv import load_dotenv
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=False)
+
+
+# ---------------------------------------------------------------------------
+# Feature-flag helpers for Indonesian adaptation
+# When all flags are OFF, behaviour is identical to upstream LightRAG.
+# ---------------------------------------------------------------------------
+
+def _get_prompts(global_config: dict) -> dict:
+    """Return PROMPTS_ID when the Indonesian-prompts flag is ON, else PROMPTS."""
+    use_id = global_config.get("addon_params", {}).get(
+        "use_indonesian_prompts", False
+    )
+    return PROMPTS_ID if use_id else PROMPTS
+
+
+def _get_entity_types(global_config: dict) -> list[str]:
+    """Return fact-check entity types when the flag is ON, else addon/default."""
+    use_fc = global_config.get("addon_params", {}).get(
+        "use_factcheck_entities", False
+    )
+    if use_fc:
+        return FACTCHECK_ENTITY_TYPES
+    return global_config.get("addon_params", {}).get(
+        "entity_types", DEFAULT_ENTITY_TYPES
+    )
 
 
 def _truncate_entity_identifier(
@@ -320,7 +346,7 @@ async def _summarize_descriptions(
 
     summary_length_recommended = global_config["summary_length_recommended"]
 
-    prompt_template = PROMPTS["summarize_entity_descriptions"]
+    prompt_template = _get_prompts(global_config)["summarize_entity_descriptions"]
 
     # Convert descriptions to JSONL format and apply token-based truncation
     tokenizer = global_config["tokenizer"]
@@ -2832,11 +2858,10 @@ async def extract_entities(
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
     language = global_config["addon_params"].get("language", DEFAULT_SUMMARY_LANGUAGE)
-    entity_types = global_config["addon_params"].get(
-        "entity_types", DEFAULT_ENTITY_TYPES
-    )
+    entity_types = _get_entity_types(global_config)
 
-    examples = "\n".join(PROMPTS["entity_extraction_examples"])
+    prompts = _get_prompts(global_config)
+    examples = "\n".join(prompts["entity_extraction_examples"])
 
     example_context_base = dict(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
@@ -2878,14 +2903,14 @@ async def extract_entities(
 
         # Get initial extraction
         # Format system prompt without input_text for each chunk (enables OpenAI prompt caching across chunks)
-        entity_extraction_system_prompt = PROMPTS[
+        entity_extraction_system_prompt = prompts[
             "entity_extraction_system_prompt"
         ].format(**context_base)
         # Format user prompts with input_text for each chunk
-        entity_extraction_user_prompt = PROMPTS["entity_extraction_user_prompt"].format(
+        entity_extraction_user_prompt = prompts["entity_extraction_user_prompt"].format(
             **{**context_base, "input_text": content}
         )
-        entity_continue_extraction_user_prompt = PROMPTS[
+        entity_continue_extraction_user_prompt = prompts[
             "entity_continue_extraction_user_prompt"
         ].format(**{**context_base, "input_text": content})
 
@@ -3123,8 +3148,9 @@ async def kg_query(
 
         Returns None when no relevant context could be constructed for the query.
     """
+    kg_prompts = _get_prompts(global_config)
     if not query:
-        return QueryResult(content=PROMPTS["fail_response"])
+        return QueryResult(content=kg_prompts["fail_response"])
 
     if query_param.model_func:
         use_model_func = query_param.model_func
@@ -3150,7 +3176,7 @@ async def kg_query(
             logger.warning(f"Forced low_level_keywords to origin query: {query}")
             ll_keywords = [query]
         else:
-            return QueryResult(content=PROMPTS["fail_response"])
+            return QueryResult(content=kg_prompts["fail_response"])
 
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
@@ -3186,7 +3212,7 @@ async def kg_query(
     )
 
     # Build system prompt
-    sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
+    sys_prompt_temp = system_prompt if system_prompt else kg_prompts["rag_response"]
     sys_prompt = sys_prompt_temp.format(
         response_type=response_type,
         user_prompt=user_prompt,
@@ -3336,7 +3362,8 @@ async def extract_keywords_only(
     """
 
     # 1. Build the examples
-    examples = "\n".join(PROMPTS["keywords_extraction_examples"])
+    kw_prompts = _get_prompts(global_config)
+    examples = "\n".join(kw_prompts["keywords_extraction_examples"])
 
     language = global_config["addon_params"].get("language", DEFAULT_SUMMARY_LANGUAGE)
 
@@ -3362,7 +3389,7 @@ async def extract_keywords_only(
             )
 
     # 3. Build the keyword-extraction prompt
-    kw_prompt = PROMPTS["keywords_extraction"].format(
+    kw_prompt = kw_prompts["keywords_extraction"].format(
         query=text,
         examples=examples,
         language=language,
@@ -4011,11 +4038,12 @@ async def _build_context_str(
     )
 
     # Get the system prompt template from PROMPTS or global_config
+    ctx_prompts = _get_prompts(global_config)
     sys_prompt_template = global_config.get(
-        "system_prompt_template", PROMPTS["rag_response"]
+        "system_prompt_template", ctx_prompts["rag_response"]
     )
 
-    kg_context_template = PROMPTS["kg_query_context"]
+    kg_context_template = ctx_prompts["kg_query_context"]
     user_prompt = query_param.user_prompt if query_param.user_prompt else ""
     response_type = (
         query_param.response_type
@@ -4898,9 +4926,10 @@ async def naive_query(
 
         Returns None when no relevant chunks are retrieved.
     """
+    naive_prompts = _get_prompts(global_config)
 
     if not query:
-        return QueryResult(content=PROMPTS["fail_response"])
+        return QueryResult(content=naive_prompts["fail_response"])
 
     if query_param.model_func:
         use_model_func = query_param.model_func
@@ -4912,7 +4941,7 @@ async def naive_query(
     tokenizer: Tokenizer = global_config["tokenizer"]
     if not tokenizer:
         logger.error("Tokenizer not found in global configuration.")
-        return QueryResult(content=PROMPTS["fail_response"])
+        return QueryResult(content=naive_prompts["fail_response"])
 
     chunks = await _get_vector_context(query, chunks_vdb, query_param, None)
 
@@ -4939,7 +4968,7 @@ async def naive_query(
 
     # Use the provided system prompt or default
     sys_prompt_template = (
-        system_prompt if system_prompt else PROMPTS["naive_rag_response"]
+        system_prompt if system_prompt else naive_prompts["naive_rag_response"]
     )
 
     # Create a preliminary system prompt with empty content_data to calculate overhead
@@ -5018,7 +5047,7 @@ async def naive_query(
         if ref["reference_id"]
     )
 
-    naive_context_template = PROMPTS["naive_query_context"]
+    naive_context_template = naive_prompts["naive_query_context"]
     context_content = naive_context_template.format(
         text_chunks_str=text_units_str,
         reference_list_str=reference_list_str,
