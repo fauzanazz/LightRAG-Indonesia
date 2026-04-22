@@ -9,8 +9,8 @@ import sys
 import time
 import logging
 from ascii_colors import ASCIIColors
-from lightrag.api import __api_version__ as api_version
-from lightrag import __version__ as core_version
+from .._version import __api_version__ as api_version
+from .._version import __version__ as core_version
 from lightrag.constants import (
     DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
 )
@@ -54,7 +54,7 @@ def check_env_file():
 
         # Check if running in interactive terminal
         if sys.stdin.isatty():
-            response = input("Do you want to continue? (yes/no): ")
+            response = input("Do you want to continue? (yes/NO): ")
             if response.lower() != "yes":
                 ASCIIColors.red("Server startup cancelled")
                 return False
@@ -140,7 +140,7 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
 
                 # ========== Token Auto-Renewal Logic ==========
                 from lightrag.api.config import global_args
-                from datetime import datetime
+                from datetime import datetime, timezone
 
                 if global_args.token_auto_renew:
                     # Check if current path should skip token renewal
@@ -156,7 +156,7 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
                             expire_time = token_info.get("exp")
                             if expire_time:
                                 # Calculate remaining time ratio
-                                now = datetime.utcnow()
+                                now = datetime.now(timezone.utc)
                                 remaining_seconds = (expire_time - now).total_seconds()
 
                                 # Get original token expiration duration

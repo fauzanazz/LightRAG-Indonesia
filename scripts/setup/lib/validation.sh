@@ -64,6 +64,26 @@ validate_port() {
   return 0
 }
 
+validate_positive_integer() {
+  local value="$1"
+
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  (( 10#$value > 0 ))
+}
+
+validate_non_negative_integer() {
+  local value="$1"
+
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  (( 10#$value >= 0 ))
+}
+
 validate_non_empty() {
   local value="$1"
 
@@ -84,7 +104,7 @@ check_storage_compatibility() {
   local warnings=()
 
   if [[ "$vector_storage" == "MongoVectorDBStorage" ]]; then
-    warnings+=("MongoDB vector storage requires an Atlas-capable deployment with Atlas Search / Vector Search support.")
+    warnings+=("MongoDB vector storage requires Atlas Search / Vector Search support, such as an Atlas cluster or Atlas Local deployment.")
   fi
 
   if [[ "$graph_storage" == "Neo4JStorage" && "$kv_storage" == "JsonKVStorage" ]]; then
@@ -207,6 +227,105 @@ validate_required_variables() {
   return 0
 }
 
+validate_opensearch_hosts_format() {
+  local hosts="${1:-${ENV_VALUES[OPENSEARCH_HOSTS]:-}}"
+  local entry=""
+  local trimmed=""
+  local has_host="no"
+  local -a entries=()
+
+  if [[ "$hosts" == *"://"* ]]; then
+    format_error \
+      "OPENSEARCH_HOSTS must use bare host:port entries, not URLs." \
+      "Set comma-separated host:port values such as localhost:9200; control TLS with OPENSEARCH_USE_SSL."
+    return 1
+  fi
+
+  IFS=',' read -r -a entries <<< "$hosts"
+  for entry in "${entries[@]}"; do
+    trimmed="${entry#"${entry%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    if [[ -z "$trimmed" ]]; then
+      format_error \
+        "OPENSEARCH_HOSTS must not contain empty host entries." \
+        "Use comma-separated host:port values such as localhost:9200 or host1:9200,host2:9200."
+      return 1
+    fi
+    has_host="yes"
+  done
+
+  if [[ "$has_host" != "yes" ]]; then
+    format_error \
+      "OPENSEARCH_HOSTS must include at least one host:port entry." \
+      "Set it to a value such as localhost:9200."
+    return 1
+  fi
+
+  return 0
+}
+
+validate_opensearch_password_strength() {
+  local password="${1:-${ENV_VALUES[OPENSEARCH_PASSWORD]:-}}"
+
+  if [[ ${#password} -lt 8 || ! "$password" =~ [A-Z] || ! "$password" =~ [a-z] || ! "$password" =~ [0-9] || ! "$password" =~ [^A-Za-z0-9] ]]; then
+    format_error \
+      "OpenSearch requires a strong OPENSEARCH_PASSWORD." \
+      "Use at least 8 characters with uppercase, lowercase, number, and special character."
+    return 1
+  fi
+
+  return 0
+}
+
+validate_opensearch_config() {
+  local deployment_mode="${1:-${ENV_VALUES[LIGHTRAG_SETUP_OPENSEARCH_DEPLOYMENT]:-}}"
+  local hosts="${2:-${ENV_VALUES[OPENSEARCH_HOSTS]:-}}"
+  local user="${3:-${ENV_VALUES[OPENSEARCH_USER]:-}}"
+  local password="${4:-${ENV_VALUES[OPENSEARCH_PASSWORD]:-}}"
+  local num_shards="${5-${ENV_VALUES[OPENSEARCH_NUMBER_OF_SHARDS]-1}}"
+  local num_replicas="${6-${ENV_VALUES[OPENSEARCH_NUMBER_OF_REPLICAS]-0}}"
+
+  if ! validate_opensearch_hosts_format "$hosts"; then
+    return 1
+  fi
+
+  if [[ -z "$user" || -z "$password" ]]; then
+    if [[ "$deployment_mode" == "docker" ]]; then
+      format_error \
+        "Bundled OpenSearch requires OPENSEARCH_USER and OPENSEARCH_PASSWORD." \
+        "Set both variables or rerun setup; the managed Docker service starts with security enabled."
+    else
+      format_error \
+        "OpenSearch requires both OPENSEARCH_USER and OPENSEARCH_PASSWORD." \
+        "This setup wizard only supports authenticated OpenSearch clusters. Set both values or rerun setup."
+    fi
+    return 1
+  fi
+
+  if ! validate_opensearch_password_strength "$password"; then
+    if [[ "$deployment_mode" == "docker" ]]; then
+      echo "${COLOR_YELLOW:-}Hint:${COLOR_RESET:-} The managed Docker image also enforces this password strength at startup." >&2
+    fi
+    return 1
+  fi
+
+  if ! validate_positive_integer "$num_shards"; then
+    format_error \
+      "OPENSEARCH_NUMBER_OF_SHARDS must be a positive integer." \
+      "Set it to 1 or greater, or rerun setup to regenerate the OpenSearch index settings."
+    return 1
+  fi
+
+  if ! validate_non_negative_integer "$num_replicas"; then
+    format_error \
+      "OPENSEARCH_NUMBER_OF_REPLICAS must be a non-negative integer." \
+      "Set it to 0 or greater, or rerun setup to regenerate the OpenSearch index settings."
+    return 1
+  fi
+
+  return 0
+}
+
 validate_mongo_vector_storage_config() {
   local vector_storage="$1"
   local mongo_uri="${2:-${ENV_VALUES[MONGO_URI]:-}}"
@@ -216,13 +335,6 @@ validate_mongo_vector_storage_config() {
     return 0
   fi
 
-  if [[ "$mongo_deployment" == "docker" ]]; then
-    format_error \
-      "MongoVectorDBStorage cannot use the local Docker MongoDB service managed by this setup wizard." \
-      "That service is MongoDB Community Edition without Atlas Search / Vector Search support. Use an Atlas-capable MongoDB endpoint instead."
-    return 1
-  fi
-
   if ! validate_uri "$mongo_uri" mongodb; then
     format_error \
       "MongoVectorDBStorage requires a valid MongoDB URI." \
@@ -230,14 +342,35 @@ validate_mongo_vector_storage_config() {
     return 1
   fi
 
-  if [[ ! "$mongo_uri" =~ ^mongodb\+srv:// ]]; then
+  if [[ "$mongo_deployment" == "docker" ]]; then
+    if [[ ! "$mongo_uri" =~ ^mongodb://([^/?#]+@)?(mongodb|localhost|127\.0\.0\.1|0\.0\.0\.0):27017([/?#].*)?$ ]] || ! _mongo_uri_has_direct_connection_true "$mongo_uri"; then
+      format_error \
+        "MongoVectorDBStorage requires the bundled Atlas Local endpoint when LIGHTRAG_SETUP_MONGODB_DEPLOYMENT=docker." \
+        "Set MONGO_URI to the wizard-managed local MongoDB URI, or remove the docker deployment marker and use a mongodb+srv:// Atlas cluster URI."
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ "$mongo_uri" =~ ^mongodb\+srv:// ]]; then
+    return 0
+  fi
+
+  if ! _mongo_uri_has_direct_connection_true "$mongo_uri"; then
     format_error \
-      "MongoVectorDBStorage requires a MongoDB Atlas URI." \
-      "Set MONGO_URI to a mongodb+srv:// endpoint backed by Atlas Search / Vector Search."
+      "MongoVectorDBStorage requires an Atlas-capable MongoDB URI." \
+      "Use a mongodb+srv:// Atlas cluster URI, a mongodb:// Atlas Local URI with ?directConnection=true, or rerun the wizard with the bundled Atlas Local Docker MongoDB service."
     return 1
   fi
 
   return 0
+}
+
+_mongo_uri_has_direct_connection_true() {
+  local uri="$1"
+  local direct_connection_pattern='[?&]directConnection=true([&#]|$)'
+
+  [[ "$uri" =~ ^mongodb:// ]] && [[ "$uri" =~ $direct_connection_pattern ]]
 }
 
 validate_auth_accounts_format() {
@@ -264,6 +397,43 @@ validate_auth_accounts_format() {
       return 1
     fi
   done
+
+  return 0
+}
+
+validate_auth_accounts_password_safety() {
+  local auth_accounts="$1"
+  local entry password normalized_password
+
+  if [[ -z "$auth_accounts" ]]; then
+    return 0
+  fi
+
+  IFS=',' read -r -a entries <<< "$auth_accounts"
+  for entry in "${entries[@]}"; do
+    password="${entry#*:}"
+    normalized_password="${password,,}"
+    if [[ "$normalized_password" == admin* || "$normalized_password" == pass* ]]; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
+validate_auth_accounts_runtime_config() {
+  local auth_accounts="$1"
+
+  if [[ -z "$auth_accounts" ]]; then
+    return 0
+  fi
+
+  if ! validate_auth_accounts_format "$auth_accounts"; then
+    format_error \
+      "AUTH_ACCOUNTS must use comma-separated user:password pairs." \
+      "Use entries like admin:{bcrypt}<hash> or admin:secret,reader:another-secret."
+    return 1
+  fi
 
   return 0
 }
@@ -308,7 +478,14 @@ validate_security_config() {
   if ! validate_auth_accounts_format "$auth_accounts"; then
     format_error \
       "AUTH_ACCOUNTS must use comma-separated user:password pairs." \
-      "Use entries like admin:secret or admin:secret,reader:another-secret."
+      "Use entries like admin:{bcrypt}<hash> or admin:secret,reader:another-secret."
+    return 1
+  fi
+
+  if ! validate_auth_accounts_password_safety "$auth_accounts"; then
+    format_error \
+      "AUTH_ACCOUNTS passwords must not start with 'admin' or 'pass'." \
+      "Choose a less predictable password or use lightrag-hash-password to generate a {bcrypt} value."
     return 1
   fi
 
@@ -319,7 +496,7 @@ validate_security_config() {
     return 1
   fi
 
-  if [[ "$token_secret" == "lightrag-jwt-default-secret" ]]; then
+  if [[ "$token_secret" == "lightrag-jwt-default-secret-key!" ]]; then
     format_error \
       "TOKEN_SECRET must not use the built-in default value when AUTH_ACCOUNTS is enabled." \
       "Generate a unique JWT signing secret and update TOKEN_SECRET."
